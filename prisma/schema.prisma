@@ -1,0 +1,64 @@
+generator client {
+  provider             = "prisma-client-py"
+  recursive_type_depth = "5"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Message {
+  id         Int      @id @default(autoincrement())
+  fromNumber String?
+  fromName   String?
+  body       String?
+  timestamp  DateTime @default(now())
+  intent     String?  // Stores the analyzed intent of the message
+}
+
+model Professional {
+  id          Int                     @id @default(autoincrement())
+  name        String
+  phone       String
+  profession  Profession              @relation(fields: [professionId], references: [id])
+  professionId Int
+  available   Boolean                 @default(true)
+  createdAt   DateTime                @default(now())
+  assignments ServiceCallAssignment[]
+  location    String?                
+}
+
+model Profession {
+  id            Int             @id @default(autoincrement())
+  name          String          @unique
+  professionals Professional[]
+}
+
+
+
+
+model ServiceCall {
+  id          Int                    @id @default(autoincrement())
+  title       String
+  description String
+  date        DateTime
+  status      String                @default("OPEN")
+  urgency     String                @default("NORMAL") // URGENT, NORMAL, LOW
+  location    String
+  profession  String                // to match with Professional's profession
+  createdAt   DateTime              @default(now())
+  assignments ServiceCallAssignment[]
+}
+
+model ServiceCallAssignment {
+  id             Int          @id @default(autoincrement())
+  serviceCallId  Int
+  professionalId Int
+  status         String       @default("PENDING")
+  price          Float?       // Optional price quote
+  createdAt      DateTime     @default(now())
+  confirmedAt    DateTime?
+  serviceCall    ServiceCall  @relation(fields: [serviceCallId], references: [id])
+  professional   Professional @relation(fields: [professionalId], references: [id])
+}
