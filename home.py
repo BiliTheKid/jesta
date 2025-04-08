@@ -16,7 +16,7 @@ def main():
 
     page = st.sidebar.selectbox(
         "Choose operation",
-        ["Send Message", "Professionals", "Service Calls", "Display Message", "Csv Uploader"]
+        ["Send Message", "Professionals", "Service Calls", "Display Message", "Upload Professionals CSV"]
     )
 
     if page == "Send Message":
@@ -25,7 +25,7 @@ def main():
         professional_page()
     elif page == "Display Message":
         dispaly_messages()
-    elif page == "Csv Uploader":
+    elif page == "Upload Professionals CSV":
         csv_upload_page()
     else:
         service_call_page()
@@ -100,10 +100,8 @@ def professional_page():
 
     # קבלת רשימת מקצועות קיימת מה-API
     professions_response = requests.get(f"{API_URL}/professions/")
-    if professions_response.status_code == 200:
-        professions = [p['name'] for p in professions_response.json()]
-    else:
-        professions = ["חשמלאי", "אינסטלטור", "נגר", "Electrician"]
+    professions_response.raise_for_status()
+    professions = [p['name'] for p in professions_response.json()]
 
     # הוספת מקצוע חדש
     with st.expander("הוספת מקצוע חדש"):
@@ -317,9 +315,12 @@ def dispaly_messages():
     messages = fetch_messages()
     display_messages_page(messages)
 
-
 def service_call_page():
     st.header("Service Calls Management")
+    
+    professions_response = requests.get(f"{API_URL}/professions/")
+    professions_response.raise_for_status()
+    professions = [p['name'] for p in professions_response.json()]
     
     # Create new service call
     with st.expander("Create New Service Call"):
@@ -328,10 +329,10 @@ def service_call_page():
             description = st.text_area("Message (Will be sent to professionals)")
             date = st.date_input("Date")
             time = st.time_input("Time")
-            location = st.selectbox("Location", city_names)
+            locations = st.multiselect("Locations", city_names)
             profession = st.selectbox(
                 "Required Profession",
-                ["Electrician", "Plumber", "Carpenter"]
+                professions
             )
             urgency = st.select_slider(
                 "Urgency",
@@ -341,10 +342,8 @@ def service_call_page():
             col1, col2 = st.columns(2)
             with col1:
                 submit = st.form_submit_button("Create Service Call")
-            with col2:
-                notify_professionals = st.checkbox("Notify available professionals", value=True)
             
-            if submit and title and description and location:
+            if submit and title and description and locations:
                 datetime_str = f"{date} {time}"
                 datetime_obj = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
                 
@@ -354,33 +353,13 @@ def service_call_page():
                         "title": title,
                         "description": description,
                         "date": datetime_obj.isoformat(),
-                        "location": location,
+                        "locations": locations,
                         "profession": profession,
                         "urgency": urgency
                     }
                 )
-                
-                if response.status_code == 200:
-                    st.success("Service call created successfully!")
-                    
-                    if notify_professionals:
-                        professionals = requests.get(
-                            f"{API_URL}/professionals/by-profession/{profession}"
-                        ).json()
-                        
-                        notification_msg = f"""{description}"""
-                        
-                        sent_count = 0
-                        for prof in professionals:
-                            if send_message(prof['phone'], notification_msg):
-                                sent_count += 1
-                        
-                        if sent_count > 0:
-                            st.success(f"Notifications sent to {sent_count} professionals")
-                        else:
-                            st.warning("Service call created but notifications failed to send")
-                else:
-                    st.error("Error creating service call")
+                response.raise_for_status()
+                st.success("Service call created successfully!")
 
     st.subheader("Existing Service Calls")
     
@@ -411,12 +390,8 @@ def service_call_page():
                         edit_title = st.text_input("Title", row['title'])
                         edit_description = st.text_area("Message (Sent to professionals)", row['description'])
                         # Handle case where location might not be in the list
-                        try:
-                            location_index = city_names.index(row['location'])
-                        except ValueError:
-                            location_index = None  # Default to first city if not found
                         
-                        edit_location = st.selectbox("Location", city_names, index=location_index)
+                        edit_locations = st.multiselect("Locations", city_names, default=row['locations'])
                         edit_status = st.selectbox(
                             "Status",
                             ["OPEN", "ASSIGNED", "CONFIRMED", "COMPLETED"],
@@ -429,13 +404,41 @@ def service_call_page():
                         delete_button = st.form_submit_button("Delete")
                         notify_button = st.form_submit_button("Send Notifications")
                     
+                    # Display professionals attached to this service call
+                    st.write("Professionals for this service call:")
+                    
+                    print(row['locations'])
+                    # Get professionals matching this service call's criteria
+                    matching_professionals = get_professionals_by_profession_and_cities(
+                        row['profession'], 
+                        row['locations']
+                    )
+
+                    # Check if we have any matching professionals
+                    if not matching_professionals or len(matching_professionals) == 0:
+                        st.info("No matching professionals found")
+                    else:
+                        # Create DataFrame only if we have data
+                        prof_df = pd.DataFrame(matching_professionals)
+                        
+                        # Remove unwanted columns and capitalize column names
+                        if not prof_df.empty:
+                            # Select only the columns we want to display
+                            prof_df = prof_df[['name', 'phone', 'location']]
+                            
+                            # Capitalize column names
+                            prof_df.columns = [col.capitalize() for col in prof_df.columns]
+
+                            st.table(prof_df)
+                        
+                        
                     if update_button:
                         response = requests.put(
                             f"{API_URL}/service-calls/{row['id']}",
                             json={
                                 "title": edit_title,
                                 "description": edit_description,
-                                "location": edit_location,
+                                "locations": edit_locations,
                                 "status": edit_status
                             }
                         )
@@ -457,29 +460,44 @@ def service_call_page():
                                 st.error("Error deleting service call")
                     
                     if notify_button:
-                        # Get professionals of matching profession
-                        professionals = requests.get(
-                            f"{API_URL}/professionals/by-profession/{row['profession']}"
-                        ).json()
-                        
-                        notification_msg = f"""Service Call:
-                        Title: {row['title']}
-                        Location: {row['location']}
-                        Date: {row['date']}
-                        Description: {row['description']}
-                        Urgency: {row['urgency']}
-                        
-                        Reply ACCEPT to take this job."""
-                        
-                        sent_count = 0
-                        for prof in professionals:
-                            if send_message(prof['phone'], notification_msg):
-                                sent_count += 1
-                        
+                        sent_count = send_notifications(row['profession'], row['description'], row['locations'])
                         if sent_count > 0:
                             st.success(f"Notifications sent to {sent_count} professionals")
                         else:
                             st.warning("No notifications sent. No available professionals found.")
+
+
+def get_professionals_by_profession_and_cities(profession, cities):
+    try:
+        if cities is None:
+            response = requests.get(
+                f"{API_URL}/professionals/by-profession/{profession}"
+            )
+        else:
+            response = requests.post(
+                f"{API_URL}/professionals/by-profession-and-cities/",
+                json={"profession": profession, "cities": cities}
+            )
+        
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        st.error(f"Error fetching professionals: {str(e)}")
+        return []
+
+
+def send_notifications(profession, description, cities=None):
+    professionals = get_professionals_by_profession_and_cities(profession, cities)
+    
+    notification_msg = f"""{description}"""
+    
+    sent_count = 0
+    for prof in professionals:
+        if send_message(prof['phone'], notification_msg):
+            sent_count += 1
+    
+    return sent_count
+
 
 if __name__ == "__main__":
     main()

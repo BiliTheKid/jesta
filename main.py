@@ -7,7 +7,6 @@ import uvicorn
 import csv
 from prisma import Prisma
 from dotenv import load_dotenv
-import aiofiles
 import logging
 from typing import AsyncGenerator
 from fastapi import FastAPI, Request, HTTPException
@@ -51,7 +50,7 @@ class ServiceCallCreate(BaseModel):
     title: str
     description: str
     date: datetime
-    location: str
+    locations: List[str]
     profession: str
     urgency: str = "NORMAL"
     status: str = "OPEN"
@@ -60,7 +59,7 @@ class ServiceCallUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     date: Optional[datetime] = None
-    location: Optional[str] = None
+    locations: Optional[List[str]] = None
     profession: Optional[str] = None
     urgency: Optional[str] = None
     status: Optional[str] = None
@@ -109,6 +108,7 @@ def serialize_professional(professional) -> dict:
         "id": professional.id,
         "name": professional.name,
         "phone": professional.phone,
+        "location": professional.location,
         "profession": professional.profession,
         "available": professional.available,
         "createdAt": serialize_datetime(professional.createdAt)
@@ -120,7 +120,7 @@ def serialize_service_call(service_call) -> dict:
         "title": service_call.title,
         "description": service_call.description,
         "date": serialize_datetime(service_call.date),
-        "location": service_call.location,
+        "locations": service_call.locations,
         "profession": service_call.profession,
         "urgency": service_call.urgency,
         "status": service_call.status,
@@ -224,6 +224,17 @@ async def get_professional(professional_id: int):
 async def update_professional(professional_id: int, data: ProfessionalUpdate):
     try:
         update_data = data.dict(exclude_unset=True)
+        
+        # If profession is being updated, fetch the profession ID
+        if 'profession' in update_data:
+            # Use the get_profession_id function
+            profession_id = await get_profession_id(update_data['profession'])
+            
+            # Replace profession name with profession ID
+            update_data['professionId'] = profession_id
+            del update_data['profession']
+            
+        print(update_data)
         updated = await prisma.professional.update(
             where={"id": professional_id},
             data=update_data
@@ -248,22 +259,41 @@ async def get_professionals_by_profession(profession: str):
         logger.error(f"Error fetching professionals by profession: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+async def get_profession_id(profession_name: str) -> Optional[int]:
+    """Translate a profession name to its corresponding ID."""
+    profession_record = await prisma.profession.find_unique(
+        where={"name": profession_name}
+    )
+    if not profession_record:
+        raise HTTPException(status_code=400, detail="Profession not found")
+    return profession_record.id
 
-# @app.get("/professionals/by-profession/{profession}")
-# async def get_professionals_by_profession(profession: str):
-#     try:
-#         professionals = await prisma.professional.find_many(
-#             where={
-#                 "profession": profession,
-#                 "available": True
-#             }
-#         )
-#         return [serialize_professional(p) for p in professionals]
-#     except Exception as e:
-#         logger.error(f"Error fetching professionals by profession: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
+@app.post("/professionals/by-profession-and-cities/")
+async def get_professionals_by_profession_and_cities(data: dict):
+    try:
+        profession_name = data.get("profession")
+        cities = data.get("cities")
+        
+        # Translate profession name to profession ID
+        profession_id = await get_profession_id(profession_name)
+        
+        # Build the where clause conditionally
+        where_clause = {
+            "professionId": profession_id,
+            "available": True
+        }
+        
+        # Only add location filter if cities are provided
+        if cities and len(cities) > 0:
+            where_clause["location"] = {"in": cities}
+            
+        professionals = await prisma.professional.find_many(
+            where=where_clause
+        )
+        return [serialize_professional(p) for p in professionals]
+    except Exception as e:
+        logger.error(f"Error fetching professionals by profession and cities: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/service-calls/", response_model=dict)
 async def create_service_call(service_call: ServiceCallCreate):
@@ -273,7 +303,7 @@ async def create_service_call(service_call: ServiceCallCreate):
                 "title": service_call.title,
                 "description": service_call.description,
                 "date": service_call.date,
-                "location": service_call.location,
+                "locations": service_call.locations,
                 "profession": service_call.profession,
                 "urgency": service_call.urgency,
                 "status": service_call.status
@@ -292,6 +322,15 @@ async def get_service_calls():
         return [serialize_service_call(sc) for sc in service_calls]
     except Exception as e:
         logger.error(f"Error fetching service calls: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/service-calls/{service_call_id}", response_model=dict)
+async def delete_service_call(service_call_id: int):
+    try:
+        await prisma.servicecall.delete(where={"id": service_call_id})
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Error deleting service call: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/service-calls/{service_call_id}", response_model=dict)
@@ -493,7 +532,7 @@ async def receive_message(request: Request):
                         # Confirm to professional
                         confirmation_msg = f"""תודה שקיבלת את העבודה!
                         כותרת: {service_call.title}
-                        מיקום: {service_call.location}
+                        מיקום: {service_call.locations}
                         תאריך: {service_call.date}
                         
                         נא לשלוח "COMPLETE" כאשר העבודה מסתיימת.

@@ -42,7 +42,7 @@ model ServiceCall {
   date        DateTime
   status      String                @default("OPEN")
   urgency     String                @default("NORMAL") // URGENT, NORMAL, LOW
-  location    String
+  locations   String[]
   profession  String                // to match with Professional's profession
   createdAt   DateTime              @default(now())
   assignments ServiceCallAssignment[]
