@@ -4,8 +4,12 @@ import requests
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 from services.whatsapp import send_message
+from cities import israeli_cities
 
 API_URL = "http://localhost:8000"
+
+# Extract city names from the israeli_cities data
+city_names = [city['שם העיר'] for city in israeli_cities]
 
 def main():
     st.title("מערכת ניהול - אנשי מקצוע")
@@ -119,7 +123,7 @@ def professional_page():
             name = st.text_input("שם")
             phone = st.text_input("טלפון")
             profession = st.selectbox("מקצוע", professions)
-            location = st.text_input("מיקום")  # ✅ Added location input
+            location = st.selectbox("מיקום", city_names)  # Use city names for location dropdown
             available = st.checkbox("זמין", value=True)
 
             col1, col2 = st.columns(2)
@@ -201,10 +205,14 @@ def professional_page():
                     with col1:
                         edit_name = st.text_input("שם", row['name'])
                         edit_phone = st.text_input("טלפון", row['phone'])
+                        if row['profession'] is None:
+                            profession_index = 0
+                        else:
+                            profession_index = professions.index(row['profession']) if row['profession'] in professions else 0
                         edit_profession = st.selectbox(
                             "מקצוע",
                             professions,
-                            index=professions.index(row['profession'])
+                            index=profession_index
                         )
                         edit_available = st.checkbox("זמין", row['available'])
 
@@ -227,7 +235,7 @@ def professional_page():
                         if response.status_code == 200:
                             st.success("עודכן בהצלחה!")
                             st.session_state.professionals = requests.get(f"{API_URL}/professionals/").json()
-                            st.experimental_rerun()
+                            st.rerun()
                         else:
                             st.error("שגיאה בעדכון בעל מלאכה")
 
@@ -237,7 +245,7 @@ def professional_page():
                             if response.status_code == 200:
                                 st.success("נמחק בהצלחה!")
                                 st.session_state.professionals = requests.get(f"{API_URL}/professionals/").json()
-                                st.experimental_rerun()
+                                st.rerun()
                             else:
                                 st.error("שגיאה במחיקת בעל מלאכה")
 
@@ -316,11 +324,11 @@ def service_call_page():
     # Create new service call
     with st.expander("Create New Service Call"):
         with st.form("new_service_call"):
-            title = st.text_input("Title")
-            description = st.text_area("Description")
+            title = st.text_input("Title (Won't be shown)")
+            description = st.text_area("Message (Will be sent to professionals)")
             date = st.date_input("Date")
             time = st.time_input("Time")
-            location = st.text_input("Location")
+            location = st.selectbox("Location", city_names)
             profession = st.selectbox(
                 "Required Profession",
                 ["Electrician", "Plumber", "Carpenter"]
@@ -360,13 +368,7 @@ def service_call_page():
                             f"{API_URL}/professionals/by-profession/{profession}"
                         ).json()
                         
-                        notification_msg = f"""New Service Call:
-                        Title: {title}
-                        Location: {location}
-                        Date: {date}
-                        Urgency: {urgency}
-                        
-                        Reply ACCEPT to take this job."""
+                        notification_msg = f"""{description}"""
                         
                         sent_count = 0
                         for prof in professionals:
@@ -407,8 +409,14 @@ def service_call_page():
                     
                     with col1:
                         edit_title = st.text_input("Title", row['title'])
-                        edit_description = st.text_area("Description", row['description'])
-                        edit_location = st.text_input("Location", row['location'])
+                        edit_description = st.text_area("Message (Sent to professionals)", row['description'])
+                        # Handle case where location might not be in the list
+                        try:
+                            location_index = city_names.index(row['location'])
+                        except ValueError:
+                            location_index = None  # Default to first city if not found
+                        
+                        edit_location = st.selectbox("Location", city_names, index=location_index)
                         edit_status = st.selectbox(
                             "Status",
                             ["OPEN", "ASSIGNED", "CONFIRMED", "COMPLETED"],
@@ -434,7 +442,7 @@ def service_call_page():
                         if response.status_code == 200:
                             st.success("Updated successfully!")
                             st.session_state.service_calls = requests.get(f"{API_URL}/service-calls/").json()
-                            st.experimental_rerun()
+                            st.rerun()
                         else:
                             st.error("Error updating service call")
                     
@@ -444,7 +452,7 @@ def service_call_page():
                             if response.status_code == 200:
                                 st.success("Deleted successfully!")
                                 st.session_state.service_calls = requests.get(f"{API_URL}/service-calls/").json()
-                                st.experimental_rerun()
+                                st.rerun()
                             else:
                                 st.error("Error deleting service call")
                     

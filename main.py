@@ -249,6 +249,22 @@ async def get_professionals_by_profession(profession: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# @app.get("/professionals/by-profession/{profession}")
+# async def get_professionals_by_profession(profession: str):
+#     try:
+#         professionals = await prisma.professional.find_many(
+#             where={
+#                 "profession": profession,
+#                 "available": True
+#             }
+#         )
+#         return [serialize_professional(p) for p in professionals]
+#     except Exception as e:
+#         logger.error(f"Error fetching professionals by profession: {e}")
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
 @app.post("/service-calls/", response_model=dict)
 async def create_service_call(service_call: ServiceCallCreate):
     try:
